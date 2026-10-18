@@ -10,6 +10,10 @@ Zoom, Google Meet, WhatsApp, a softphone and so on). One hotkey starts it, the
 same hotkey stops it, and a notification tells you when Speakr has the notes
 ready.
 
+<a href="docs/promo/meetingrecorder-promo.mp4"><img src="docs/promo/poster.jpg" width="320" alt="MeetingRecorder in 35 seconds: press Ctrl+Alt+R and it records"></a>
+
+[Watch MeetingRecorder in 35 seconds](docs/promo/meetingrecorder-promo.mp4) (with sound).
+
 - **Tiny and native.** A single signed `.exe` of about 1 MB, written in C++
   against WASAPI. No runtime, no background services, no window to manage.
 - **Crash-proof recordings.** Audio is written to disk as it's recorded (Opus,
