@@ -20,7 +20,7 @@ GitHub Releases and runs it silently, so no MSIX packaging is needed.
 
 | Field | Value |
 |---|---|
-| Package URL | `https://github.com/Feridoun/MeetingRecorder/releases/download/v1.3.1/MeetingRecorder-Setup-1.3.1.exe` |
+| Package URL | `https://github.com/Feridoun/MeetingRecorder/releases/download/v1.3.2/MeetingRecorder-Setup-1.3.2.exe` |
 | Architecture | x64 |
 | Language | English (United States) |
 | App type | EXE |

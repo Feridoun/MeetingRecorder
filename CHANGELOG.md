@@ -4,6 +4,14 @@ All notable changes to MeetingRecorder (called CallRecorder up to 1.2) are
 listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.3.2] - 2026-10-31
+
+### Changed
+
+- A fresher tray icon when not recording: a slate ring around a blue dot,
+  instead of a plain grey dot. All tray icons now have smooth edges and a
+  little shading.
+
 ## [1.3.1] - 2026-09-30
 
 ### Changed
@@ -148,6 +156,7 @@ reach it. Use Pause (`Ctrl+Alt+P`) or Sensitive mode for private moments.
 - First release: records both sides of a call to Ogg Opus with one hotkey and
   uploads it to your Speakr server.
 
+[1.3.2]: https://github.com/Feridoun/MeetingRecorder/releases/tag/v1.3.2
 [1.3.1]: https://github.com/Feridoun/MeetingRecorder/releases/tag/v1.3.1
 [1.3.0]: https://github.com/Feridoun/MeetingRecorder/releases/tag/v1.3.0
 [1.2.0]: https://github.com/Feridoun/MeetingRecorder/releases/tag/v1.2.0

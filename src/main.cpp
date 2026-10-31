@@ -21,6 +21,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -92,36 +93,76 @@ struct App {
 };
 App app;
 
-HICON MakeDotIcon(COLORREF color) {
+// Draws a tray icon: a dot shaded lighter at the top, optionally inside a ring
+// (the idle "ready to record" look). Antialiased by 4x4 supersampling into a
+// 32-bit ARGB bitmap.
+HICON MakeDotIcon(COLORREF dotColor, std::optional<COLORREF> ringColor = std::nullopt) {
     int size = GetSystemMetrics(SM_CXSMICON);
-    HDC screen = GetDC(nullptr);
-    HDC dc = CreateCompatibleDC(screen);
-    HBITMAP image = CreateCompatibleBitmap(screen, size, size);
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(bmi.bmiHeader);
+    bmi.bmiHeader.biWidth = size;
+    bmi.bmiHeader.biHeight = -size;  // top-down
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+    void* bits = nullptr;
+    HBITMAP image = CreateDIBSection(nullptr, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
     HBITMAP mask = CreateBitmap(size, size, 1, 1, nullptr);
-    RECT all{0, 0, size, size};
-    int inset = size / 8;
+    if (!image || !mask) {
+        if (image) DeleteObject(image);
+        if (mask) DeleteObject(mask);
+        return nullptr;
+    }
 
-    // Black image + white mask outside the dot = transparent.
-    HGDIOBJ previous = SelectObject(dc, image);
-    FillRect(dc, &all, static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
-    HBRUSH fill = CreateSolidBrush(color);
-    SelectObject(dc, fill);
-    SelectObject(dc, GetStockObject(NULL_PEN));
-    Ellipse(dc, inset, inset, size - inset + 1, size - inset + 1);
+    bool ring = ringColor.has_value();
+    double center = size / 2.0;
+    double dotRadius = size * (ring ? 0.22 : 0.375);
+    double ringOuter = size * 0.4375;
+    double ringInner = ringOuter - std::max(1.25, size * 0.1);
+    auto channel = [](COLORREF c, int shift) { return static_cast<double>((c >> shift) & 0xFF); };
 
-    SelectObject(dc, mask);
-    FillRect(dc, &all, static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH)));
-    SelectObject(dc, GetStockObject(BLACK_BRUSH));
-    Ellipse(dc, inset, inset, size - inset + 1, size - inset + 1);
-    SelectObject(dc, previous);
+    auto* pixels = static_cast<DWORD*>(bits);
+    constexpr int kSamples = 4;
+    for (int y = 0; y < size; ++y) {
+        for (int x = 0; x < size; ++x) {
+            double dotCover = 0, ringCover = 0;
+            for (int sy = 0; sy < kSamples; ++sy) {
+                for (int sx = 0; sx < kSamples; ++sx) {
+                    double dx = x + (sx + 0.5) / kSamples - center;
+                    double dy = y + (sy + 0.5) / kSamples - center;
+                    double d = std::sqrt(dx * dx + dy * dy);
+                    if (d <= dotRadius) dotCover += 1;
+                    else if (ring && d >= ringInner && d <= ringOuter) ringCover += 1;
+                }
+            }
+            dotCover /= kSamples * kSamples;
+            ringCover /= kSamples * kSamples;
+            double alpha = dotCover + ringCover;
+            if (alpha <= 0) {
+                pixels[y * size + x] = 0;
+                continue;
+            }
+            // Lighten the dot towards white at the top, for a little depth.
+            double t = std::clamp((y + 0.5 - (center - dotRadius)) / (2 * dotRadius), 0.0, 1.0);
+            double lighten = 0.35 * (1 - t);
+            double rgb[3];
+            for (int i = 0; i < 3; ++i) {
+                double dot = channel(dotColor, i * 8);
+                dot += (255 - dot) * lighten;
+                double ringValue = ring ? channel(*ringColor, i * 8) : 0;
+                rgb[i] = (dot * dotCover + ringValue * ringCover) / alpha;
+            }
+            pixels[y * size + x] = (static_cast<DWORD>(std::min(alpha, 1.0) * 255 + 0.5) << 24) |
+                                   (static_cast<DWORD>(rgb[0] + 0.5) << 16) |  // red
+                                   (static_cast<DWORD>(rgb[1] + 0.5) << 8) |   // green
+                                   static_cast<DWORD>(rgb[2] + 0.5);           // blue
+        }
+    }
 
     ICONINFO info{TRUE, 0, 0, mask, image};
     HICON icon = CreateIconIndirect(&info);
-    DeleteObject(fill);
     DeleteObject(image);
     DeleteObject(mask);
-    DeleteDC(dc);
-    ReleaseDC(nullptr, screen);
     return icon;
 }
 
@@ -782,7 +823,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     app.recorder = std::make_unique<Recorder>(app.window);
     app.uploader = std::make_unique<Uploader>(app.window, app.sessionsDir);
 
-    app.idleIcon = MakeDotIcon(RGB(128, 128, 128));
+    app.idleIcon = MakeDotIcon(RGB(59, 130, 246), RGB(100, 116, 139));
     app.recordingIcon = MakeDotIcon(RGB(220, 38, 38));
     app.localOnlyIcon = MakeDotIcon(RGB(147, 51, 234));
     app.pausedIcon = MakeDotIcon(RGB(245, 158, 11));
