@@ -35,5 +35,10 @@ wingetcreate update Feridoun.MeetingRecorder --version <version> `
 ```
 
 Then update `ReleaseNotes` in winget-pkgs, and copy the new folder here to keep
-a record. The installer hash must match the published file, so don't rebuild
+a record.
+
+winget-pkgs rejects manifests with a deprecated `ManifestVersion` (1.10.0 was
+rejected in October 2026; 1.28.0 is current). Keep `wingetcreate` up to date
+(`winget upgrade Microsoft.WingetCreate`) so it writes the current version, and
+check the `ManifestVersion` lines and schema URLs before submitting. The installer hash must match the published file, so don't rebuild
 or re-sign a release after publishing it.
