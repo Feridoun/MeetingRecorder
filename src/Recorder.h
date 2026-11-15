@@ -44,6 +44,9 @@ public:
     static std::vector<AudioDevice> ListDevices(bool microphones);
     // The name of any known device, connected or not; empty if unknown.
     static std::wstring DeviceName(const std::wstring& id);
+    // The name of the device recording uses when none is chosen (the default
+    // communications microphone, or the default playback device); empty if none.
+    static std::wstring DefaultDeviceName(bool microphone);
 
     explicit Recorder(HWND notifyWindow);
     ~Recorder();
@@ -64,6 +67,9 @@ public:
     void SetPaused(bool paused);
     bool IsPaused() const { return paused_; }
     double RecordedSeconds() const;
+    // The loudest microphone sample (0 to 1) since the last call, for a level
+    // meter; 0 while no microphone is open.
+    float TakeMicPeak() { return micPeak_.exchange(0.0f); }
 
     // Warnings since the last call, oldest first.
     std::vector<std::wstring> TakeWarnings();
@@ -85,6 +91,7 @@ private:
     std::thread thread_;
     std::atomic<bool> paused_{false};
     std::atomic<int64_t> recordedSamples_{0};
+    std::atomic<float> micPeak_{0.0f};
     bool separateChannels_ = false;
     // The thread's QPC timeline origin; written before Start returns.
     int64_t clockStart_ = 0;

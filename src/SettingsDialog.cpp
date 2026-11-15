@@ -49,7 +49,6 @@ constexpr wchar_t kUnreadableNote[] =
 // What the dialog was opened with, to tell what the user changed.
 struct State {
     Config original;
-    std::vector<std::wstring> micIds;      // IDC_MIC's items, in order; "" is the default
     std::vector<std::wstring> speakerIds;  // IDC_SPEAKERS's items, in order; "" is the default
     bool testing = false;                  // a connection test is running
     std::shared_ptr<Liveness> liveness;
@@ -236,7 +235,6 @@ void Init(HWND dialog) {
                         reinterpret_cast<LPARAM>(haveToken ? L"Saved. Leave blank to keep it."
                                                            : L"Paste your API token"));
 
-    FillDevices(dialog, IDC_MIC, true, config.microphone, state.micIds);
     FillDevices(dialog, IDC_SPEAKERS, false, config.speakers, state.speakerIds);
 
     SetDlgItemTextW(dialog, IDC_TAGS, JoinList(config.tags).c_str());
@@ -257,7 +255,7 @@ void Init(HWND dialog) {
 
     ShowBaselineStatus(dialog);
     SetForegroundWindow(dialog);
-    SetFocus(GetDlgItem(dialog, config.serverUrl.empty() ? IDC_URL : haveToken ? IDC_MIC : IDC_TOKEN));
+    SetFocus(GetDlgItem(dialog, config.serverUrl.empty() ? IDC_URL : haveToken ? IDC_SPEAKERS : IDC_TOKEN));
 }
 
 // Writes the dialog's settings and closes it.
@@ -266,7 +264,8 @@ void FinishSave(HWND dialog) {
     config.serverUrl = NormalizeServerUrl(GetText(dialog, IDC_URL));
     std::wstring typedToken = Trim(GetText(dialog, IDC_TOKEN));
 
-    config.microphone = SelectedDevice(dialog, IDC_MIC, state.micIds);
+    // Chosen from the tray menu, maybe while this dialog was open.
+    config.microphone = Config::Load().microphone;
     config.speakers = SelectedDevice(dialog, IDC_SPEAKERS, state.speakerIds);
     config.tags = SplitList(GetText(dialog, IDC_TAGS));
     config.hotwords = Trim(GetText(dialog, IDC_HOTWORDS));

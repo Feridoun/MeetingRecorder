@@ -585,6 +585,17 @@ std::wstring Recorder::DeviceName(const std::wstring& id) {
     return FriendlyName(device.Get());
 }
 
+std::wstring Recorder::DefaultDeviceName(bool microphone) {
+    ComPtr<IMMDeviceEnumerator> enumerator;
+    ComPtr<IMMDevice> device;
+    if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&enumerator))) ||
+        FAILED(enumerator->GetDefaultAudioEndpoint(microphone ? eCapture : eRender,
+                                                   microphone ? eCommunications : eConsole, &device))) {
+        return {};
+    }
+    return FriendlyName(device.Get());
+}
+
 Recorder::Recorder(HWND notifyWindow)
     : notifyWindow_(notifyWindow), stopEvent_(CreateEventW(nullptr, TRUE, FALSE, nullptr)) {}
 
@@ -842,6 +853,10 @@ void Recorder::Run(std::wstring audioPath, std::wstring title, HANDLE ready, std
             // A microphone that is open but only ever silent is probably muted
             // or the wrong one. (Loopback is silent whenever nobody speaks.)
             float micPeak = mic.TakePeak();
+            // Hand the loudest sample to the UI's level meter (it takes and
+            // resets it a few times a second).
+            for (float shown = micPeak_.load(); micPeak > shown && !micPeak_.compare_exchange_weak(shown, micPeak);) {
+            }
             ULONGLONG nowMs = GetTickCount64();
             if (!mic.IsOpen() || paused_ || micPeak >= kSilentPeak) {
                 quietSince = nowMs;
@@ -913,6 +928,7 @@ void Recorder::Run(std::wstring audioPath, std::wstring title, HANDLE ready, std
     }
 
     writer.Close();
+    micPeak_ = 0.0f;
     mic.Close();
     system.Close();
     apps.Close();

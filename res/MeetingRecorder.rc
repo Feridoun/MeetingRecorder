@@ -26,10 +26,10 @@ BEGIN
     LTEXT "", IDC_STATUS, 76, 82, 230, 26
 
     GROUPBOX "Audio devices", -1, 7, 117, 306, 50
-    LTEXT "&Microphone", -1, 14, 132, 58, 9
-    COMBOBOX IDC_MIC, 76, 130, 230, 150, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    LTEXT "&Playback", -1, 14, 149, 58, 9
-    COMBOBOX IDC_SPEAKERS, 76, 147, 230, 150, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT "&Playback", -1, 14, 132, 58, 9
+    COMBOBOX IDC_SPEAKERS, 76, 130, 230, 150, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT "Microphone", -1, 14, 149, 58, 9
+    LTEXT "Choose it from the tray icon's menu.", -1, 76, 149, 230, 9
 
     GROUPBOX "Recordings", -1, 7, 172, 306, 187
     LTEXT "Default ta&gs", -1, 14, 187, 58, 9

@@ -20,7 +20,7 @@ GitHub Releases and runs it silently, so no MSIX packaging is needed.
 
 | Field | Value |
 |---|---|
-| Package URL | `https://github.com/Feridoun/MeetingRecorder/releases/download/v1.3.2/MeetingRecorder-Setup-1.3.2.exe` |
+| Package URL | `https://github.com/Feridoun/MeetingRecorder/releases/download/v1.4.0/MeetingRecorder-Setup-1.4.0.exe` |
 | Architecture | x64 |
 | Language | English (United States) |
 | App type | EXE |
@@ -183,7 +183,7 @@ Paste this into **Submission options > Notes for certification**:
 > 2. Press Ctrl+Alt+R (or double-click the tray icon). The icon turns red and a "Recording started" notification appears.
 > 3. Speak, or play some audio, for a few seconds, then press Ctrl+Alt+R again. A "Recording saved" notification appears.
 > 4. Tray menu > "Recordings..." lists the recording, and Play opens it in the default player. "Open recordings folder" shows the .opus file and its .json file. Without a server, its upload_state stays "pending" and nothing is uploaded.
-> 5. Other tray menu items: Pause (Ctrl+Alt+P), Add marker (Ctrl+Alt+K), Sensitive, Keep last recording on this PC, Settings (microphone and playback device pickers, Start at login), Exit.
+> 5. Other tray menu items: Pause (Ctrl+Alt+P), Add marker (Ctrl+Alt+K), Sensitive, Keep last recording on this PC, Microphone (picker), Settings (playback device picker, Start at login), Exit.
 >
 > [Optional: a test Speakr server is available at <URL> with API token <TOKEN>, valid until <DATE>.]
 >

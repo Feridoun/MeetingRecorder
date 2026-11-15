@@ -38,7 +38,18 @@ constexpr UINT_PTR kTooltipTimer = 1;
 constexpr UINT_PTR kMenuTimer = 2;  // delays the left-click menu so a double-click can win
 constexpr UINT_PTR kSetupTimer = 3;  // opens Settings on first run, once the tray is up
 constexpr UINT_PTR kCallTimer = 4;   // looks for calls starting and ending
+constexpr UINT_PTR kLevelTimer = 5;  // animates the tray icon with the microphone level
 constexpr UINT kCallPollMs = 2000;
+constexpr UINT kLevelPollMs = 100;
+constexpr int kLevelSteps = 5;  // tray icon frames, from no glow to full
+// Microphone peaks this quiet or quieter count as no input (-60 dBFS, as the
+// recorder's silence warning). The glow spans kQuietDb to kLoudDb.
+constexpr float kInputPeak = 0.001f;
+constexpr double kQuietDb = -55.0;
+constexpr double kLoudDb = -15.0;
+// After this long without input the icon says so: soon enough to notice a
+// muted microphone, long enough not to flicker between sentences.
+constexpr ULONGLONG kNoInputMs = 4000;
 constexpr double kMinimumSeconds = 2.0;  // shorter sessions are treated as accidental
 // A recording started and stopped by call detection that's shorter than this
 // was most likely a microphone check (e.g. Teams' pre-join screen), not a call.
@@ -49,6 +60,8 @@ enum Command : UINT {
     kKeepLast, kUploadHeld, kRecordings,
     kTagFirst = 1000,  // kTagFirst + i toggles App::menuTags[i]
     kTagLast = 1999,
+    kMicFirst = 2000,  // kMicFirst + i records from App::menuMics[i]
+    kMicLast = 2199,
 };
 
 struct Hotkey {
@@ -64,39 +77,17 @@ constexpr Hotkey kHotkeys[] = {
 };
 constexpr size_t kHotkeyCount = std::size(kHotkeys);
 
-struct App {
-    HINSTANCE instance = nullptr;
-    HWND window = nullptr;
-    UINT taskbarCreated = 0;
-    NOTIFYICONDATAW tray{};
-    HICON idleIcon = nullptr;
-    HICON recordingIcon = nullptr;
-    HICON localOnlyIcon = nullptr;
-    HICON pausedIcon = nullptr;
-    std::unique_ptr<Recorder> recorder;
-    std::unique_ptr<Uploader> uploader;
-    std::optional<Session> session;
-    std::wstring sessionsDir;
-    std::array<bool, kHotkeyCount> hotkeyRegistered{};  // parallel to kHotkeys; another app may own a combination
-    std::wstring lastMetaPath;  // sidecar of the last recording saved this run, for "Keep last recording"
-    bool sensitive = false;  // applies to the current session and the next one
-    std::vector<std::wstring> tags;      // Speakr tags for the current session and the next one
-    std::vector<std::wstring> menuTags;  // the Tags submenu's items, in order, while it's open
-    std::function<void()> notificationAction;  // runs when the current notification is clicked
-    CallLogic::CallTracker calls;
-    std::vector<DetectedCall> detectedCalls;  // from the last check
-    std::wstring callApp;  // the call the current recording is of ("Teams"); empty if none
-    bool callStartedRecording = false;  // call detection started the current recording
-    bool callSubjectFound = false;  // the current recording's title names its meeting
-    POINT menuPoint{};
-    ULONGLONG ignoreSelectUntil = 0;
+// What a tray icon shows, in fractions of the icon's width.
+struct IconShape {
+    COLORREF color;
+    double dotRadius = 0.375;              // 0 for no dot
+    std::optional<COLORREF> ringColor;     // a ring round the edge (idle, and "no microphone input")
+    double glow = 0;                       // 0 to 1: a halo round the dot, for the microphone level
+    bool slash = false;                    // a diagonal bar across the ring: "nothing coming in"
 };
-App app;
 
-// Draws a tray icon: a dot shaded lighter at the top, optionally inside a ring
-// (the idle "ready to record" look). Antialiased by 4x4 supersampling into a
-// 32-bit ARGB bitmap.
-HICON MakeDotIcon(COLORREF dotColor, std::optional<COLORREF> ringColor = std::nullopt) {
+// Draws a tray icon. Antialiased by 4x4 supersampling into a 32-bit ARGB bitmap.
+HICON MakeIcon(const IconShape& shape) {
     int size = GetSystemMetrics(SM_CXSMICON);
     BITMAPINFO bmi{};
     bmi.bmiHeader.biSize = sizeof(bmi.bmiHeader);
@@ -114,44 +105,56 @@ HICON MakeDotIcon(COLORREF dotColor, std::optional<COLORREF> ringColor = std::nu
         return nullptr;
     }
 
-    bool ring = ringColor.has_value();
     double center = size / 2.0;
-    double dotRadius = size * (ring ? 0.22 : 0.375);
+    double dotRadius = size * shape.dotRadius;
     double ringOuter = size * 0.4375;
-    double ringInner = ringOuter - std::max(1.25, size * 0.1);
+    double ringWidth = std::max(1.25, size * 0.1);
+    double ringInner = ringOuter - ringWidth;
+    double glowOuter = dotRadius + (size * 0.5 - dotRadius) * shape.glow;
     auto channel = [](COLORREF c, int shift) { return static_cast<double>((c >> shift) & 0xFF); };
 
     auto* pixels = static_cast<DWORD*>(bits);
     constexpr int kSamples = 4;
     for (int y = 0; y < size; ++y) {
+        // Lighten the dot towards white at the top, for a little depth.
+        double t = dotRadius > 0 ? std::clamp((y + 0.5 - (center - dotRadius)) / (2 * dotRadius), 0.0, 1.0) : 1.0;
+        double lighten = 0.35 * (1 - t);
         for (int x = 0; x < size; ++x) {
-            double dotCover = 0, ringCover = 0;
+            double alphaSum = 0;
+            double rgbSum[3] = {};
+            auto add = [&](COLORREF color, double alpha, double lift) {
+                alphaSum += alpha;
+                for (int i = 0; i < 3; ++i) {
+                    double value = channel(color, i * 8);
+                    rgbSum[i] += (value + (255 - value) * lift) * alpha;
+                }
+            };
             for (int sy = 0; sy < kSamples; ++sy) {
                 for (int sx = 0; sx < kSamples; ++sx) {
                     double dx = x + (sx + 0.5) / kSamples - center;
                     double dy = y + (sy + 0.5) / kSamples - center;
                     double d = std::sqrt(dx * dx + dy * dy);
-                    if (d <= dotRadius) dotCover += 1;
-                    else if (ring && d >= ringInner && d <= ringOuter) ringCover += 1;
+                    // Distance from the bar running bottom-left to top-right.
+                    double fromSlash = std::fabs(dx + dy) / std::sqrt(2.0);
+                    if (dotRadius > 0 && d <= dotRadius) {
+                        add(shape.color, 1, lighten);
+                    } else if (shape.ringColor && d >= ringInner && d <= ringOuter) {
+                        add(*shape.ringColor, 1, 0);
+                    } else if (shape.slash && d < ringInner && fromSlash <= ringWidth / 2) {
+                        add(*shape.ringColor, 1, 0);
+                    } else if (d < glowOuter) {
+                        // Fades out from the dot's edge.
+                        add(shape.color, 0.8 * (glowOuter - d) / (glowOuter - dotRadius), 0.25);
+                    }
                 }
             }
-            dotCover /= kSamples * kSamples;
-            ringCover /= kSamples * kSamples;
-            double alpha = dotCover + ringCover;
-            if (alpha <= 0) {
+            if (alphaSum <= 0) {
                 pixels[y * size + x] = 0;
                 continue;
             }
-            // Lighten the dot towards white at the top, for a little depth.
-            double t = std::clamp((y + 0.5 - (center - dotRadius)) / (2 * dotRadius), 0.0, 1.0);
-            double lighten = 0.35 * (1 - t);
+            double alpha = alphaSum / (kSamples * kSamples);
             double rgb[3];
-            for (int i = 0; i < 3; ++i) {
-                double dot = channel(dotColor, i * 8);
-                dot += (255 - dot) * lighten;
-                double ringValue = ring ? channel(*ringColor, i * 8) : 0;
-                rgb[i] = (dot * dotCover + ringValue * ringCover) / alpha;
-            }
+            for (int i = 0; i < 3; ++i) rgb[i] = rgbSum[i] / alphaSum;
             pixels[y * size + x] = (static_cast<DWORD>(std::min(alpha, 1.0) * 255 + 0.5) << 24) |
                                    (static_cast<DWORD>(rgb[0] + 0.5) << 16) |  // red
                                    (static_cast<DWORD>(rgb[1] + 0.5) << 8) |   // green
@@ -165,6 +168,59 @@ HICON MakeDotIcon(COLORREF dotColor, std::optional<COLORREF> ringColor = std::nu
     DeleteObject(mask);
     return icon;
 }
+
+// The icons while recording in one colour: the dot glowing with the
+// microphone level, and a slashed empty ring when nothing comes in.
+struct LevelIcons {
+    std::array<HICON, kLevelSteps> levels{};
+    HICON noInput = nullptr;
+
+    explicit LevelIcons(COLORREF color) {
+        for (int i = 0; i < kLevelSteps; ++i) {
+            double level = static_cast<double>(i) / (kLevelSteps - 1);
+            levels[i] = MakeIcon({color, 0.26 + 0.08 * level, std::nullopt, level});
+        }
+        noInput = MakeIcon({color, 0, color, 0, true});
+    }
+    LevelIcons() = default;
+    void Destroy() {
+        for (HICON icon : levels) DestroyIcon(icon);
+        DestroyIcon(noInput);
+    }
+};
+
+struct App {
+    HINSTANCE instance = nullptr;
+    HWND window = nullptr;
+    UINT taskbarCreated = 0;
+    NOTIFYICONDATAW tray{};
+    HICON idleIcon = nullptr;
+    LevelIcons recordingIcons;
+    LevelIcons localOnlyIcons;
+    HICON pausedIcon = nullptr;
+    HICON shownIcon = nullptr;  // what the tray shows, so unchanged frames aren't resent
+    double micLevel = 0;        // 0 to 1, smoothed, for the tray icon's glow
+    ULONGLONG lastInput = 0;    // when the microphone last picked something up
+    std::unique_ptr<Recorder> recorder;
+    std::unique_ptr<Uploader> uploader;
+    std::optional<Session> session;
+    std::wstring sessionsDir;
+    std::array<bool, kHotkeyCount> hotkeyRegistered{};  // parallel to kHotkeys; another app may own a combination
+    std::wstring lastMetaPath;  // sidecar of the last recording saved this run, for "Keep last recording"
+    bool sensitive = false;  // applies to the current session and the next one
+    std::vector<std::wstring> tags;      // Speakr tags for the current session and the next one
+    std::vector<std::wstring> menuTags;  // the Tags submenu's items, in order, while it's open
+    std::vector<std::wstring> menuMics;  // the Microphone submenu's device IDs, in order; "" is the default
+    std::function<void()> notificationAction;  // runs when the current notification is clicked
+    CallLogic::CallTracker calls;
+    std::vector<DetectedCall> detectedCalls;  // from the last check
+    std::wstring callApp;  // the call the current recording is of ("Teams"); empty if none
+    bool callStartedRecording = false;  // call detection started the current recording
+    bool callSubjectFound = false;  // the current recording's title names its meeting
+    POINT menuPoint{};
+    ULONGLONG ignoreSelectUntil = 0;
+};
+App app;
 
 bool IsRecording() {
     return app.session.has_value();
@@ -207,21 +263,55 @@ std::wstring UploadSummary() {
     return parts.empty() ? L"All recordings are in Speakr" : parts;
 }
 
+// Recording, not paused, and the microphone has picked nothing up for a while.
+bool NoMicInput() {
+    return IsRecording() && !app.recorder->IsPaused() && GetTickCount64() - app.lastInput >= kNoInputMs;
+}
+
+HICON CurrentIcon() {
+    if (!IsRecording()) return app.idleIcon;
+    if (app.recorder->IsPaused()) return app.pausedIcon;
+    const LevelIcons& icons = app.session->sensitive ? app.localOnlyIcons : app.recordingIcons;
+    if (NoMicInput()) return icons.noInput;
+    return icons.levels[static_cast<size_t>(std::lround(app.micLevel * (kLevelSteps - 1)))];
+}
+
 void UpdateTray() {
     std::wstring tip;
     if (!IsRecording()) {
-        app.tray.hIcon = app.idleIcon;
         tip = std::wstring(kAppName) + L": ready";
         if (app.sensitive) tip += L" (next session local only)";
         tip += L"\n" + UploadSummary();
     } else {
         bool paused = app.recorder->IsPaused();
-        app.tray.hIcon = paused ? app.pausedIcon : app.session->sensitive ? app.localOnlyIcon : app.recordingIcon;
         tip = (paused ? L"Paused " : L"Recording ") + FormatDuration(app.recorder->RecordedSeconds());
         if (app.session->sensitive) tip += L" (local only)";
+        if (NoMicInput()) tip += L"\nNo sound from the microphone";
     }
+    app.tray.hIcon = app.shownIcon = CurrentIcon();
     wcsncpy_s(app.tray.szTip, tip.c_str(), _TRUNCATE);
     app.tray.uFlags = NIF_ICON | NIF_TIP | NIF_SHOWTIP;
+    Shell_NotifyIconW(NIM_MODIFY, &app.tray);
+}
+
+// Runs every kLevelPollMs while recording: makes the icon glow with the
+// microphone level, and shows when nothing has come in for a while.
+void UpdateLevel() {
+    if (!IsRecording()) return;
+    float peak = app.recorder->TakeMicPeak();
+    if (peak > kInputPeak) app.lastInput = GetTickCount64();
+    double db = 20 * std::log10(std::max(peak, 1e-6f));
+    double level = std::clamp((db - kQuietDb) / (kLoudDb - kQuietDb), 0.0, 1.0);
+    // Rise at once, fall over about half a second, like a level meter.
+    app.micLevel = std::max(level, app.micLevel - 0.2);
+    HICON icon = CurrentIcon();
+    if (icon == app.shownIcon) return;
+    // The tooltip mentions no input, so refresh it too when that changes.
+    bool noInputChanged = (icon == app.recordingIcons.noInput || icon == app.localOnlyIcons.noInput) !=
+                          (app.shownIcon == app.recordingIcons.noInput || app.shownIcon == app.localOnlyIcons.noInput);
+    if (noInputChanged) return UpdateTray();
+    app.tray.hIcon = app.shownIcon = icon;
+    app.tray.uFlags = NIF_ICON;
     Shell_NotifyIconW(NIM_MODIFY, &app.tray);
 }
 
@@ -317,7 +407,10 @@ void StartRecording(std::wstring callApp = {}, bool automatic = false) {
     app.callApp = callApp;
     app.callStartedRecording = automatic;
     app.callSubjectFound = !subject.empty();
+    app.micLevel = 0;
+    app.lastInput = GetTickCount64();  // give the microphone a moment before saying it's silent
     SetTimer(app.window, kTooltipTimer, 1000, nullptr);
+    SetTimer(app.window, kLevelTimer, kLevelPollMs, nullptr);
     UpdateTray();
     const Hotkey* stopKey = RegisteredHotkey(kToggle);
     std::wstring stopHint = stopKey ? std::wstring(L"Press ") + stopKey->label + L" to stop." : L"Stop it from the tray menu.";
@@ -337,6 +430,7 @@ void StopRecording(bool byCallEnd = false) {
     app.callSubjectFound = false;
     app.recorder->Stop();
     KillTimer(app.window, kTooltipTimer);
+    KillTimer(app.window, kLevelTimer);
     Session session = std::move(*app.session);
     app.session.reset();
     UpdateTray();
@@ -413,6 +507,7 @@ void TogglePause() {
     if (!IsRecording()) return;
     bool paused = !app.recorder->IsPaused();
     app.recorder->SetPaused(paused);
+    if (!paused) app.lastInput = GetTickCount64();
     UpdateTray();
     const Hotkey* pauseKey = RegisteredHotkey(kPause);
     std::wstring hint = pauseKey ? std::wstring(pauseKey->label) + L" to toggle."
@@ -616,6 +711,64 @@ HMENU BuildTagsMenu() {
     return tags;
 }
 
+// "Windows default (Headset Microphone)", or the chosen device's name.
+std::wstring MicName(const std::wstring& id) {
+    if (id.empty()) {
+        std::wstring name = Recorder::DefaultDeviceName(true);
+        return name.empty() ? L"Windows default" : L"Windows default (" + name + L")";
+    }
+    std::wstring name = Recorder::DeviceName(id);
+    return name.empty() ? L"Chosen microphone" : name;
+}
+
+// The Windows default, each connected microphone, and the chosen one if it's
+// unplugged (recording uses the default until it's back).
+HMENU BuildMicMenu(const std::wstring& chosen) {
+    app.menuMics = {L""};
+    std::vector<std::wstring> labels = {MicName(L"")};
+    bool chosenListed = chosen.empty();
+    for (const auto& device : Recorder::ListDevices(true)) {
+        app.menuMics.push_back(device.id);
+        labels.push_back(device.name);
+        if (device.id == chosen) chosenListed = true;
+    }
+    if (!chosenListed) {
+        app.menuMics.push_back(chosen);
+        labels.push_back(MicName(chosen) + L" (not connected)");
+    }
+    size_t count = std::min<size_t>(app.menuMics.size(), kMicLast - kMicFirst + 1);
+    app.menuMics.resize(count);
+
+    HMENU mics = CreatePopupMenu();
+    for (size_t i = 0; i < count; ++i) {
+        AppendMenuW(mics, MF_STRING | (app.menuMics[i] == chosen ? MF_CHECKED : MF_UNCHECKED),
+                    kMicFirst + static_cast<UINT>(i), MenuLabel(labels[i]).c_str());
+        if (i == 0 && count > 1) AppendMenuW(mics, MF_SEPARATOR, 0, nullptr);
+    }
+    return mics;
+}
+
+// Records from App::menuMics[index] from now on, including the current recording.
+void ChooseMic(size_t index) {
+    if (index >= app.menuMics.size()) return;
+    Config config = Config::Load();
+    if (config.unreadable) {
+        // Saving would replace the damaged file; Settings explains that first.
+        Notify(L"Settings unreadable", L"Fix or reset your settings in Settings, then choose the microphone again.",
+               NIIF_WARNING);
+        return;
+    }
+    config.microphone = app.menuMics[index];
+    if (!config.Save()) {
+        Notify(L"Couldn't change the microphone", L"Couldn't write " + Config::Path() + L".", NIIF_ERROR);
+        return;
+    }
+    if (IsRecording()) {
+        app.recorder->SetDevices(ChosenDevices());
+        app.lastInput = GetTickCount64();  // the new device gets a moment too
+    }
+}
+
 void ShowMenu(POINT at) {
     HMENU menu = CreatePopupMenu();
     bool recording = IsRecording();
@@ -629,6 +782,11 @@ void ShowMenu(POINT at) {
                 ((paused ? L"Resume" : L"Pause") + Accelerator(kPause)).c_str());
     AppendMenuW(menu, MF_STRING | whenRecording, kMarker, (L"Add marker" + Accelerator(kMarker)).c_str());
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    std::wstring chosenMic = Config::Load().microphone;
+    std::wstring micLabel = L"Microphone: " + MicName(chosenMic);
+    if (micLabel.size() > 60) micLabel = micLabel.substr(0, 57) + L"...";
+    if (NoMicInput()) micLabel += L" (no sound)";
+    AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(BuildMicMenu(chosenMic)), MenuLabel(micLabel).c_str());
     AppendMenuW(menu, MF_STRING | (app.sensitive ? MF_CHECKED : MF_UNCHECKED), kSensitive,
                 L"Sensitive: keep on this PC only");
     std::wstring tagsLabel = L"Tags: " + (app.tags.empty() ? std::wstring(L"none") : JoinTags(app.tags));
@@ -665,6 +823,7 @@ void ShowMenu(POINT at) {
 
 void RunCommand(UINT command) {
     if (command >= kTagFirst && command <= kTagLast) return ToggleTag(command - kTagFirst);
+    if (command >= kMicFirst && command <= kMicLast) return ChooseMic(command - kMicFirst);
     switch (command) {
         case kToggle: IsRecording() ? StopRecording() : StartRecording(); break;
         case kPause: TogglePause(); break;
@@ -729,6 +888,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
             return 0;
         case WM_TIMER:
             if (wParam == kTooltipTimer) UpdateTray();
+            if (wParam == kLevelTimer) UpdateLevel();
             if (wParam == kMenuTimer) {
                 KillTimer(window, kMenuTimer);
                 ShowMenu(app.menuPoint);
@@ -823,10 +983,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     app.recorder = std::make_unique<Recorder>(app.window);
     app.uploader = std::make_unique<Uploader>(app.window, app.sessionsDir);
 
-    app.idleIcon = MakeDotIcon(RGB(59, 130, 246), RGB(100, 116, 139));
-    app.recordingIcon = MakeDotIcon(RGB(220, 38, 38));
-    app.localOnlyIcon = MakeDotIcon(RGB(147, 51, 234));
-    app.pausedIcon = MakeDotIcon(RGB(245, 158, 11));
+    app.idleIcon = MakeIcon({RGB(59, 130, 246), 0.22, RGB(100, 116, 139)});
+    app.recordingIcons = LevelIcons(RGB(220, 38, 38));
+    app.localOnlyIcons = LevelIcons(RGB(147, 51, 234));
+    app.pausedIcon = MakeIcon({RGB(245, 158, 11)});
     AddTrayIcon();
     ApplyCallDetection();
 
@@ -861,7 +1021,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
 
     app.uploader.reset();
     app.recorder.reset();
-    for (HICON icon : {app.idleIcon, app.recordingIcon, app.localOnlyIcon, app.pausedIcon}) DestroyIcon(icon);
+    for (HICON icon : {app.idleIcon, app.pausedIcon}) DestroyIcon(icon);
+    app.recordingIcons.Destroy();
+    app.localOnlyIcons.Destroy();
     CoUninitialize();
     ReleaseMutex(singleInstance);
     CloseHandle(singleInstance);

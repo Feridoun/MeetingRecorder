@@ -4,6 +4,18 @@ All notable changes to MeetingRecorder (called CallRecorder up to 1.2) are
 listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.4.0] - 2026-11-15
+
+### Changed
+
+- Choose the microphone straight from the tray menu (**Microphone**) instead
+  of Settings. The menu shows which one is in use, including the actual device
+  behind "Windows default".
+- While recording, the tray icon glows with your microphone level, so you can
+  see it's hearing you. If nothing comes in from the microphone for 4 seconds
+  (muted, unplugged or the wrong device), the icon turns into a slashed empty
+  ring and the tooltip and menu say there's no sound.
+
 ## [1.3.2] - 2026-10-31
 
 ### Changed

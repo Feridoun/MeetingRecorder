@@ -86,15 +86,17 @@ A grey dot appears in the tray.
 | Pause / resume (paused time is left out) | `Ctrl+Alt+P` | menu |
 | Add a marker | `Ctrl+Alt+K` | menu |
 
-Click the icon for the menu, which also has **Sensitive**, **Tags**, upload
+Click the icon for the menu, which also has **Microphone**, **Sensitive**, **Tags**, upload
 status, **Keep last recording on this PC**, **Upload now**, **Open Speakr**,
 **Recordings...**, the recordings folder and **Settings**. If another app
 already uses one of the shortcuts, MeetingRecorder tells you at start-up and
 leaves that shortcut out of the menu.
 
-Tray icon colours: **grey** idle, **red** recording, **purple** recording in
-local-only mode, **amber** paused. Hover over it for the elapsed time and upload
-status.
+Tray icon colours: **blue in a ring** idle, **red** recording, **purple** recording in
+local-only mode, **amber** paused. While recording, the dot glows with your
+microphone level; if the microphone picks up nothing for 4 seconds it becomes a
+**slashed empty ring** (no sound coming in). Hover over it for the elapsed time
+and upload status.
 
 When you stop, the recording uploads after a short grace period (60 seconds by
 default). When Speakr has finished (usually a minute or two after that), a
@@ -159,9 +161,9 @@ first upload.
 
 By default MeetingRecorder records Windows' default communications microphone and
 default playback device, and follows them when they change. To record a
-specific device instead, pick it under **Microphone** or **Playback** in
-**Settings**. The choice takes effect as soon as you save, even
-mid-recording. If the chosen device isn't connected, MeetingRecorder uses the
+specific microphone instead, pick it from **Microphone** in the tray menu; for
+a specific playback device, use **Playback** in **Settings**. Either choice
+takes effect at once, even mid-recording. If the chosen device isn't connected, MeetingRecorder uses the
 Windows default and switches back when the device returns.
 
 If Windows blocks desktop apps from using the microphone (Settings > Privacy &
@@ -294,7 +296,7 @@ straight away after **Upload now**.
 | `hotwords` | Comma-separated names and jargon to help transcription, e.g. `"Anika, Kubernetes, SLA"` |
 | `keep_audio_days` | Delete local audio this many days after Speakr has finished with it (0 = keep forever). Only recordings with notes ready are ever deleted. Local-only, held, failed, stuck and missing recordings keep their audio |
 | `sensitive_by_default` | Start every launch in local-only mode |
-| `microphone`, `speakers` | Windows device IDs to record; empty follows the Windows default. Easiest to pick in **Settings** |
+| `microphone`, `speakers` | Windows device IDs to record; empty follows the Windows default. Easiest to pick from the tray menu (microphone) and **Settings** (speakers) |
 | `upload_delay_seconds` | Seconds to wait after you stop before uploading, 0 to 3600 (default 60; 0 = at once) |
 | `separate_channels` | `true` records stereo: your microphone on the left, everyone else on the right |
 | `echo_cancellation` | `true` opens the microphone as a communications stream so Windows can apply echo cancellation where the device supports it. Windows may lower other apps' sound while recording. Default `false`; not in Settings |

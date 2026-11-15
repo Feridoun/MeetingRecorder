@@ -7,7 +7,7 @@
 #define IDC_TOKEN 102
 #define IDC_STATUS 103
 #define IDC_TEST 104
-#define IDC_MIC 105
+// 105 was IDC_MIC; the microphone is chosen from the tray menu.
 #define IDC_SPEAKERS 106
 #define IDC_TAGS 107
 #define IDC_HOTWORDS 108
