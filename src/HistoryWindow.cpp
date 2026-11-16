@@ -1,5 +1,7 @@
 #include "HistoryWindow.h"
 
+#include "DarkMode.h"
+#include "Dialogs.h"
 #include "Session.h"
 #include "Util.h"
 #include "resource.h"
@@ -17,7 +19,6 @@
 namespace {
 
 constexpr wchar_t kClassName[] = L"MeetingRecorderHistoryWindow";
-constexpr wchar_t kAppName[] = L"MeetingRecorder";
 constexpr UINT_PTR kRefreshTimer = 1;
 constexpr UINT kRefreshMs = 2000;
 
@@ -303,12 +304,16 @@ void Refresh(bool force) {
 
 // ---- Actions ---------------------------------------------------------------
 
-void Tell(const std::wstring& text) {
-    MessageBoxW(ui.window, text.c_str(), kAppName, MB_OK | MB_ICONINFORMATION);
+void Problem(const std::wstring& heading) {
+    Tell(ui.window, DialogIcon::kInfo, heading);
 }
 
-bool Confirm(const std::wstring& text, UINT icon) {
-    return MessageBoxW(ui.window, text.c_str(), kAppName, MB_YESNO | icon | MB_DEFBUTTON2) == IDYES;
+// Asks before deleting the selected recording.
+bool ConfirmDelete(const Session& shown) {
+    return Confirm(ui.window, DialogIcon::kWarning, L"Delete this recording?",
+                   InSpeakr(shown) ? L"This deletes the audio and details from this PC. The copy in Speakr stays."
+                                   : L"This deletes the audio and details from this PC. It can't be undone.",
+                   L"Delete");
 }
 
 // Reloads the sidecar under the file lock, re-checks it still qualifies (the
@@ -334,7 +339,7 @@ void ChangeSession(const Session& shown, Allowed allowed, Change change) {
             }
         }
     }
-    if (!problem.empty()) Tell(problem);
+    if (!problem.empty()) Problem(problem);
     if (changed && ui.onChanged) ui.onChanged();
     Refresh(true);
 }
@@ -357,9 +362,9 @@ void ShowInFolder(const Row& row) {
 
 void Upload(const Row& row) {
     const Session shown = row.session;
-    std::wstring question = L"Upload this recording to " + ui.serverUrl + L"?";
-    if (shown.uploadState == UploadState::kLocalOnly) question += L"\n\nIt was set to stay on this PC.";
-    if (!Confirm(question, MB_ICONQUESTION) || !ui.window) return;
+    std::wstring body = L"It goes to " + ui.serverUrl + L".";
+    if (shown.uploadState == UploadState::kLocalOnly) body += L" It was set to stay on this PC.";
+    if (!Confirm(ui.window, DialogIcon::kNone, L"Upload this recording?", body, L"Upload") || !ui.window) return;
 
     const std::wstring server = ui.serverUrl;
     ChangeSession(
@@ -378,25 +383,11 @@ void KeepOnThisPc(const Row& row) {
     ChangeSession(row.session, StateAllowsKeep, [](Session& s) { s.SetSensitive(true); });
 }
 
-void DeleteRecording(const Row& row) {
-    const Session shown = row.session;
-    std::wstring question = L"Delete this recording?\n\n";
-    question += InSpeakr(shown) ? L"This deletes the audio and details from this PC. The copy in Speakr stays."
-                                : L"This deletes the audio and details from this PC. It can't be undone.";
-    if (!Confirm(question, MB_ICONWARNING) || !ui.window) return;
-
-    ChangeSession(
-        shown, [](const Session& s) { return !IsRecordingNow(s); }, [](Session& s) { s.Discard(); });
-}
-
 // The Save in ChangeSession would rewrite the sidecar Discard just deleted, so
 // deleting has its own path.
 void DeleteUnderLock(const Row& row) {
     const Session shown = row.session;
-    std::wstring question = L"Delete this recording?\n\n";
-    question += InSpeakr(shown) ? L"This deletes the audio and details from this PC. The copy in Speakr stays."
-                                : L"This deletes the audio and details from this PC. It can't be undone.";
-    if (!Confirm(question, MB_ICONWARNING) || !ui.window) return;
+    if (!ConfirmDelete(shown) || !ui.window) return;
 
     std::wstring problem;
     bool deleted = false;
@@ -412,7 +403,7 @@ void DeleteUnderLock(const Row& row) {
             deleted = true;
         }
     }
-    if (!problem.empty()) Tell(problem);
+    if (!problem.empty()) Problem(problem);
     if (deleted && ui.onChanged) ui.onChanged();
     Refresh(true);
 }
@@ -533,6 +524,8 @@ bool Create(HWND window) {
     }
 
     MakeFont();
+    // Explorer's row highlights, and dark if Windows is.
+    DarkMode::Apply(window);
     Layout();
     Refresh(true);
     SetTimer(window, kRefreshTimer, kRefreshMs, nullptr);
@@ -540,6 +533,8 @@ bool Create(HWND window) {
 }
 
 LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
+    LRESULT themed = 0;
+    if (ui.window && DarkMode::HandleMessage(window, message, wParam, lParam, themed)) return themed;
     switch (message) {
         case WM_CREATE:
             return Create(window) ? 0 : -1;

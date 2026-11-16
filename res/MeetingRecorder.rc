@@ -13,7 +13,7 @@ EXSTYLE WS_EX_APPWINDOW
 CAPTION "MeetingRecorder settings"
 FONT 9, "Segoe UI"
 BEGIN
-    GROUPBOX "Speakr connection", -1, 7, 5, 306, 107
+    LTEXT "Speakr connection", IDC_HEADING_CONNECTION, 7, 4, 306, 11
     LTEXT "Recordings upload to your Speakr server for transcripts and summaries.",
           -1, 14, 17, 292, 9
     LTEXT "&Address", -1, 14, 33, 58, 9
@@ -25,13 +25,13 @@ BEGIN
     PUSHBUTTON "T&est", IDC_TEST, 14, 83, 50, 14
     LTEXT "", IDC_STATUS, 76, 82, 230, 26
 
-    GROUPBOX "Audio devices", -1, 7, 117, 306, 50
+    LTEXT "Audio devices", IDC_HEADING_DEVICES, 7, 116, 306, 11
     LTEXT "&Playback", -1, 14, 132, 58, 9
     COMBOBOX IDC_SPEAKERS, 76, 130, 230, 150, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
     LTEXT "Microphone", -1, 14, 149, 58, 9
     LTEXT "Choose it from the tray icon's menu.", -1, 76, 149, 230, 9
 
-    GROUPBOX "Recordings", -1, 7, 172, 306, 187
+    LTEXT "Recordings", IDC_HEADING_RECORDINGS, 7, 171, 306, 11
     LTEXT "Default ta&gs", -1, 14, 187, 58, 9
     EDITTEXT IDC_TAGS, 76, 185, 230, 13, ES_AUTOHSCROLL
     LTEXT "Comma-separated. Ticked in the Tags menu each time MeetingRecorder starts.", -1, 76, 200, 230, 9

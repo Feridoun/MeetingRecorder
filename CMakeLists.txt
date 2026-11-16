@@ -21,7 +21,10 @@ add_executable(MeetingRecorder WIN32
     src/Autostart.cpp
     src/CallDetector.cpp
     src/Config.cpp
+    src/DarkMode.cpp
+    src/Dialogs.cpp
     src/HistoryWindow.cpp
+    src/MenuIcons.cpp
     src/Migration.cpp
     src/SettingsDialog.cpp
     src/HttpClient.cpp
@@ -45,7 +48,7 @@ target_link_options(MeetingRecorder PRIVATE /MANIFEST:NO)
 
 target_link_libraries(MeetingRecorder PRIVATE
     ${OPUSENC_LIBRARY} Opus::opus nlohmann_json::nlohmann_json
-    ole32 shell32 user32 gdi32 advapi32 winhttp comctl32 avrt mmdevapi
+    ole32 shell32 user32 gdi32 advapi32 winhttp comctl32 uxtheme dwmapi avrt mmdevapi
 )
 
 # Unit tests: the non-UI sources compiled straight into a console program, run
