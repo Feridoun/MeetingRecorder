@@ -2,6 +2,8 @@
 
 #include "Autostart.h"
 #include "Config.h"
+#include "DarkMode.h"
+#include "Dialogs.h"
 #include "HttpClient.h"
 #include "Recorder.h"
 #include "Util.h"
@@ -27,6 +29,10 @@ constexpr int kMaxUploadDelay = 3600;  // seconds
 // Posted by the connection-test thread to the dialog; lParam is a TestResult*
 // the receiver deletes.
 constexpr UINT kTestDone = WM_APP + 1;
+// Posted to itself after a DPI change, once the dialog has rescaled its font.
+constexpr UINT kRefreshHeadings = WM_APP + 2;
+
+constexpr int kHeadings[] = {IDC_HEADING_CONNECTION, IDC_HEADING_DEVICES, IDC_HEADING_RECORDINGS};
 
 struct TestResult {
     std::wstring text;
@@ -52,8 +58,23 @@ struct State {
     std::vector<std::wstring> speakerIds;  // IDC_SPEAKERS's items, in order; "" is the default
     bool testing = false;                  // a connection test is running
     std::shared_ptr<Liveness> liveness;
+    HFONT headingFont = nullptr;
 };
 State state;
+
+// The section headings in a larger, semibold version of the dialog's font.
+void SetHeadingFont(HWND dialog) {
+    LOGFONTW font{};
+    HFONT dialogFont = reinterpret_cast<HFONT>(SendMessageW(dialog, WM_GETFONT, 0, 0));
+    if (!dialogFont || !GetObjectW(dialogFont, sizeof(font), &font)) return;
+    font.lfWeight = FW_SEMIBOLD;
+    font.lfHeight = MulDiv(font.lfHeight, 115, 100);
+    HFONT heading = CreateFontIndirectW(&font);
+    if (!heading) return;
+    for (int id : kHeadings) SendDlgItemMessageW(dialog, id, WM_SETFONT, reinterpret_cast<WPARAM>(heading), TRUE);
+    if (state.headingFont) DeleteObject(state.headingFont);
+    state.headingFont = heading;
+}
 
 std::wstring GetText(HWND dialog, int id) {
     HWND control = GetDlgItem(dialog, id);
@@ -254,6 +275,8 @@ void Init(HWND dialog) {
     CheckDlgButton(dialog, IDC_AUTOSTART, Autostart::IsEnabled() ? BST_CHECKED : BST_UNCHECKED);
 
     ShowBaselineStatus(dialog);
+    SetHeadingFont(dialog);
+    DarkMode::Apply(dialog);
     SetForegroundWindow(dialog);
     SetFocus(GetDlgItem(dialog, config.serverUrl.empty() ? IDC_URL : haveToken ? IDC_SPEAKERS : IDC_TOKEN));
 }
@@ -284,13 +307,12 @@ void FinishSave(HWND dialog) {
         return SetStatus(dialog, L"Windows Credential Manager refused to store the token.");
     }
     if (!config.Save()) {
-        return (void)MessageBoxW(dialog, (L"Couldn't write " + Config::Path() + L".").c_str(), L"MeetingRecorder",
-                                 MB_OK | MB_ICONERROR);
+        return Tell(dialog, DialogIcon::kError, L"Couldn't save your settings", L"Couldn't write " + Config::Path() + L".");
     }
     bool autostart = IsDlgButtonChecked(dialog, IDC_AUTOSTART) == BST_CHECKED;
     if (autostart != Autostart::IsEnabled() && !Autostart::SetEnabled(autostart)) {
-        MessageBoxW(dialog, L"Your settings were saved, but Windows refused to change Start at login.",
-                    L"MeetingRecorder", MB_OK | MB_ICONWARNING);
+        Tell(dialog, DialogIcon::kWarning, L"Your settings were saved",
+             L"But Windows refused to change whether MeetingRecorder starts when you sign in.");
     }
     EndDialog(dialog, IDOK);
 }
@@ -304,8 +326,7 @@ void Save(HWND dialog) {
                              !Trim(GetText(dialog, IDC_TOKEN)).empty();
     if (!connectionChanged) return FinishSave(dialog);
     if (IsInsecure(dialog) &&
-        MessageBoxW(dialog, (std::wstring(kInsecureWarning) + L"\n\nSave this address anyway?").c_str(),
-                    L"MeetingRecorder", MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) != IDYES) {
+        !Confirm(dialog, DialogIcon::kWarning, L"Save an unencrypted address?", kInsecureWarning, L"Save anyway")) {
         return;
     }
     BeginTest(dialog, true);
@@ -318,14 +339,15 @@ void OnTestDone(HWND dialog, const TestResult& result) {
     SetStatus(dialog, text);
     if (!result.thenSave) return;
     if (!result.ok &&
-        MessageBoxW(dialog, (result.text + L"\n\nSave these settings anyway?").c_str(), L"MeetingRecorder",
-                    MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) != IDYES) {
+        !Confirm(dialog, DialogIcon::kWarning, L"The connection check failed", result.text, L"Save anyway")) {
         return;
     }
     FinishSave(dialog);
 }
 
 INT_PTR CALLBACK DialogProc(HWND dialog, UINT message, WPARAM wParam, LPARAM lParam) {
+    INT_PTR themed = 0;
+    if (DarkMode::HandleDialogMessage(dialog, message, wParam, lParam, themed)) return themed;
     switch (message) {
         case WM_INITDIALOG:
             openDialog = dialog;
@@ -350,8 +372,17 @@ INT_PTR CALLBACK DialogProc(HWND dialog, UINT message, WPARAM wParam, LPARAM lPa
         case kTestDone:
             OnTestDone(dialog, *std::unique_ptr<TestResult>(reinterpret_cast<TestResult*>(lParam)));
             return TRUE;
+        case WM_DPICHANGED:
+            PostMessageW(dialog, kRefreshHeadings, 0, 0);
+            break;  // the dialog manager rescales everything else
+        case kRefreshHeadings:
+            SetHeadingFont(dialog);
+            return TRUE;
         case WM_DESTROY: {
             openDialog = nullptr;
+            // The headings are destroyed after this, but nothing draws with the font any more.
+            if (state.headingFont) DeleteObject(state.headingFont);
+            state.headingFont = nullptr;
             {
                 std::lock_guard lock(state.liveness->mutex);
                 state.liveness->alive = false;

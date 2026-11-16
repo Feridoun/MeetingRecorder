@@ -5,7 +5,10 @@
 #include "CallDetector.h"
 #include "CallLogic.h"
 #include "Config.h"
+#include "Dialogs.h"
+#include "DarkMode.h"
 #include "HistoryWindow.h"
+#include "MenuIcons.h"
 #include "Migration.h"
 #include "Recorder.h"
 #include "Session.h"
@@ -645,12 +648,18 @@ void HandleHeld() {
     int count = app.uploader->GetStatus().held;
     if (count <= 0) return;
     bool one = count == 1;
-    std::wstring text = (one ? std::wstring(L"1 recording was") : std::to_wstring(count) + L" recordings were") +
-                        L" made before Speakr was set up or for a different server.\n\nUpload " +
-                        (one ? L"it" : L"them") + L" to " + config.serverUrl + L"?\n\nYes: upload " +
-                        (one ? L"it" : L"them") + L". No: keep " + (one ? L"it" : L"them") + L" on this PC only.";
-    int answer = MessageBoxW(app.window, text.c_str(), kAppName,
-                             MB_YESNOCANCEL | MB_ICONQUESTION | MB_DEFBUTTON3 | MB_SETFOREGROUND);
+    const std::wstring them = one ? L"it" : L"them";
+    std::wstring upload = L"Upload " + them + L"\nTo " + config.serverUrl;
+    std::wstring keep = L"Keep " + them + L" on this PC only\n" + (one ? L"It" : L"They") +
+                        L" won't be uploaded unless you choose Upload in Recordings.";
+    DialogOptions options;
+    options.heading = (one ? std::wstring(L"1 recording is") : std::to_wstring(count) + L" recordings are") +
+                      L" waiting for you";
+    options.body = std::wstring(one ? L"It was" : L"They were") +
+                   L" made before Speakr was set up, or for a different Speakr server.";
+    options.buttons = {{IDYES, upload.c_str()}, {IDNO, keep.c_str()}};
+    options.commandLinks = true;
+    int answer = ShowDialog(app.window, options);
     if (answer != IDYES && answer != IDNO) return;
     {
         std::lock_guard lock(Session::FileMutex());
@@ -771,47 +780,58 @@ void ChooseMic(size_t index) {
 
 void ShowMenu(POINT at) {
     HMENU menu = CreatePopupMenu();
+    MenuIcons::Set icons(app.window);  // outlives the menu
+    // Appends an item, with an icon unless glyph is 0.
+    auto add = [&](UINT flags, UINT_PTR id, const std::wstring& label, wchar_t glyph = 0, bool red = false) {
+        AppendMenuW(menu, flags, id, label.c_str());
+        if (glyph) {
+            icons.Add(menu, GetMenuItemCount(menu) - 1, static_cast<MenuIcons::Glyph>(glyph), !(flags & MF_GRAYED),
+                      red);
+        }
+    };
+    auto separator = [&] { AppendMenuW(menu, MF_SEPARATOR, 0, nullptr); };
     bool recording = IsRecording();
     bool paused = recording && app.recorder->IsPaused();
     UINT whenRecording = recording ? MF_ENABLED : MF_GRAYED;
 
     std::vector<std::wstring> activeCalls = app.calls.Active();
     std::wstring startLabel = activeCalls.empty() ? L"Start recording" : L"Record " + activeCalls.front() + L" call";
-    AppendMenuW(menu, MF_STRING, kToggle, ((recording ? L"Stop recording" : startLabel) + Accelerator(kToggle)).c_str());
-    AppendMenuW(menu, MF_STRING | whenRecording, kPause,
-                ((paused ? L"Resume" : L"Pause") + Accelerator(kPause)).c_str());
-    AppendMenuW(menu, MF_STRING | whenRecording, kMarker, (L"Add marker" + Accelerator(kMarker)).c_str());
-    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    add(MF_STRING, kToggle, (recording ? L"Stop recording" : startLabel) + Accelerator(kToggle),
+        recording ? MenuIcons::kStop : MenuIcons::kRecord, !recording);
+    add(MF_STRING | whenRecording, kPause, (paused ? L"Resume" : L"Pause") + Accelerator(kPause),
+        paused ? MenuIcons::kPlay : MenuIcons::kPause);
+    add(MF_STRING | whenRecording, kMarker, L"Add marker" + Accelerator(kMarker), MenuIcons::kFlag);
+    separator();
     std::wstring chosenMic = Config::Load().microphone;
     std::wstring micLabel = L"Microphone: " + MicName(chosenMic);
     if (micLabel.size() > 60) micLabel = micLabel.substr(0, 57) + L"...";
     if (NoMicInput()) micLabel += L" (no sound)";
-    AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(BuildMicMenu(chosenMic)), MenuLabel(micLabel).c_str());
-    AppendMenuW(menu, MF_STRING | (app.sensitive ? MF_CHECKED : MF_UNCHECKED), kSensitive,
-                L"Sensitive: keep on this PC only");
+    add(MF_POPUP, reinterpret_cast<UINT_PTR>(BuildMicMenu(chosenMic)), MenuLabel(micLabel), MenuIcons::kMicrophone);
+    add(MF_STRING | (app.sensitive ? MF_CHECKED : MF_UNCHECKED), kSensitive, L"Sensitive: keep on this PC only",
+        MenuIcons::kLock);
     std::wstring tagsLabel = L"Tags: " + (app.tags.empty() ? std::wstring(L"none") : JoinTags(app.tags));
     if (tagsLabel.size() > 60) tagsLabel = tagsLabel.substr(0, 57) + L"...";
-    AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(BuildTagsMenu()), tagsLabel.c_str());
-    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, UploadSummary().c_str());
-    AppendMenuW(menu, MF_STRING | (app.lastMetaPath.empty() ? MF_GRAYED : MF_ENABLED), kKeepLast,
-                L"Keep last recording on this PC");
-    AppendMenuW(menu, MF_STRING, kUploadNow, L"Upload now");
+    add(MF_POPUP, reinterpret_cast<UINT_PTR>(BuildTagsMenu()), tagsLabel, MenuIcons::kTag);
+    separator();
+    add(MF_STRING | MF_GRAYED, 0, UploadSummary());
+    add(MF_STRING | (app.lastMetaPath.empty() ? MF_GRAYED : MF_ENABLED), kKeepLast, L"Keep last recording on this PC",
+        MenuIcons::kComputer);
+    add(MF_STRING, kUploadNow, L"Upload now", MenuIcons::kUpload);
     Uploader::Status status = app.uploader->GetStatus();
     if (status.held > 0) {
-        std::wstring label = L"Upload " + Plural(status.held, L"held recording", L"held recordings") + L"...";
-        AppendMenuW(menu, MF_STRING, kUploadHeld, label.c_str());
+        add(MF_STRING, kUploadHeld,
+            L"Upload " + Plural(status.held, L"held recording", L"held recordings") + L"...", MenuIcons::kUpload);
     }
     // problems also counts missing and stuck ones, which retrying wouldn't help;
     // RetryRefused only requeues the refused ones.
-    if (status.problems > 0) AppendMenuW(menu, MF_STRING, kRetryRefused, L"Retry refused uploads");
-    AppendMenuW(menu, MF_STRING, kOpenSpeakr, L"Open Speakr");
-    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(menu, MF_STRING, kRecordings, L"Recordings...");
-    AppendMenuW(menu, MF_STRING, kOpenFolder, L"Open recordings folder");
-    AppendMenuW(menu, MF_STRING, kSettings, L"Settings...");
-    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(menu, MF_STRING, kExit, recording ? L"Stop, save and exit" : L"Exit");
+    if (status.problems > 0) add(MF_STRING, kRetryRefused, L"Retry refused uploads", MenuIcons::kRefresh);
+    add(MF_STRING, kOpenSpeakr, L"Open Speakr", MenuIcons::kOpenInNew);
+    separator();
+    add(MF_STRING, kRecordings, L"Recordings...", MenuIcons::kHistory);
+    add(MF_STRING, kOpenFolder, L"Open recordings folder", MenuIcons::kFolderOpen);
+    add(MF_STRING, kSettings, L"Settings...", MenuIcons::kSettings);
+    separator();
+    add(MF_STRING, kExit, recording ? L"Stop, save and exit" : L"Exit", MenuIcons::kPower);
     SetMenuDefaultItem(menu, kToggle, FALSE);
 
     // Required so the menu closes when the user clicks elsewhere.
@@ -911,6 +931,10 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
             }
             UpdateTray();
             return 0;
+        case WM_SETTINGCHANGE:
+            // Re-reads light or dark for the tray menu; open windows handle it themselves.
+            DarkMode::OnSettingChange(wParam, lParam);
+            break;
         case WM_QUERYENDSESSION:
             return TRUE;
         case WM_ENDSESSION:
@@ -931,35 +955,34 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     HANDLE singleInstance = CreateMutexW(nullptr, TRUE, L"Local\\MeetingRecorder.SingleInstance");
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
-        MessageBoxW(nullptr, L"MeetingRecorder is already running. Look for it in the system tray.", kAppName,
-                    MB_ICONINFORMATION);
+        Tell(nullptr, DialogIcon::kInfo, L"MeetingRecorder is already running", L"Look for it in the system tray.");
         return 0;
     }
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    DarkMode::Init();
 
     // Carries settings and recordings over from when the app was CallRecorder.
     if (Migration::OldAppRunning()) {
-        MessageBoxW(nullptr,
-                    L"CallRecorder, this app's old name, is still running. Exit it from its tray icon, then start "
-                    L"MeetingRecorder again. Your settings and recordings move over when you do.",
-                    kAppName, MB_ICONINFORMATION);
+        Tell(nullptr, DialogIcon::kInfo, L"CallRecorder is still running",
+             L"CallRecorder is this app's old name. Exit it from its tray icon, then start MeetingRecorder again. "
+             L"Your settings and recordings move over when you do.");
         return 0;
     }
     std::wstring notMoved = Migration::FromCallRecorder();
     if (!notMoved.empty()) {
         // Stop before creating the new folders, or the next start would find
         // them and skip the move.
-        MessageBoxW(nullptr,
-                    (L"Couldn't move your settings and recordings over from CallRecorder, this app's old name:\n\n" +
-                     notMoved + L"\n\nClose anything using these folders, then start MeetingRecorder again.")
-                        .c_str(),
-                    kAppName, MB_ICONWARNING);
+        Tell(nullptr, DialogIcon::kWarning, L"Couldn't move your settings and recordings over",
+             L"They're still in the folders of CallRecorder, this app's old name:\n\n" + notMoved +
+                 L"\n\nClose anything using these folders, then start MeetingRecorder again.");
         return 1;
     }
 
     app.sessionsDir = SessionsDirectory();
     if (app.sessionsDir.empty()) {
-        MessageBoxW(nullptr, L"Couldn't create the recordings folder under %LOCALAPPDATA%.", kAppName, MB_ICONERROR);
+        Tell(nullptr, DialogIcon::kError, L"Couldn't create the recordings folder",
+             L"MeetingRecorder keeps recordings under %LOCALAPPDATA%\\MeetingRecorder, and Windows refused to create "
+             L"that folder.");
         return 1;
     }
 
@@ -974,6 +997,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     // windows don't receive the TaskbarCreated broadcast.
     app.window = CreateWindowExW(0, windowClass.lpszClassName, kAppName, WS_OVERLAPPED, 0, 0, 0, 0, nullptr,
                                  nullptr, instance, nullptr);
+    DarkMode::AllowForMenus(app.window);
     app.taskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
     Config config = Config::Load();
     app.sensitive = config.sensitiveByDefault || config.unreadable;  // unreadable: fail closed

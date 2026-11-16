@@ -19,3 +19,7 @@
 #define IDC_SEPARATE 114
 #define IDC_LOOPBACK_APPS 115
 #define IDC_CALL_DETECTION 116
+// Section headings, drawn in a bolder font.
+#define IDC_HEADING_CONNECTION 117
+#define IDC_HEADING_DEVICES 118
+#define IDC_HEADING_RECORDINGS 119

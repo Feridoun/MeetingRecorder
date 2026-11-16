@@ -4,6 +4,19 @@ All notable changes to MeetingRecorder (called CallRecorder up to 1.2) are
 listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+
+- Questions and warnings use modern Windows dialogs, with a clear heading and
+  buttons that say what they do (**Upload**, **Delete**, **Save anyway**)
+  instead of Yes and No.
+- The Recordings list highlights rows the way File Explorer does.
+- Follows Windows dark mode: the tray menu, title bars, Settings and
+  Recordings turn dark when your apps are set to dark.
+- The tray menu has icons next to its items.
+- Settings has section headings in place of the boxed groups.
+
 ## [1.4.0] - 2026-11-15
 
 ### Changed
