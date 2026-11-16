@@ -4,7 +4,7 @@ All notable changes to MeetingRecorder (called CallRecorder up to 1.2) are
 listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [1.5.0] - 2026-11-16
 
 ### Changed
 
@@ -181,6 +181,8 @@ reach it. Use Pause (`Ctrl+Alt+P`) or Sensitive mode for private moments.
 - First release: records both sides of a call to Ogg Opus with one hotkey and
   uploads it to your Speakr server.
 
+[1.5.0]: https://github.com/Feridoun/MeetingRecorder/releases/tag/v1.5.0
+[1.4.0]: https://github.com/Feridoun/MeetingRecorder/releases/tag/v1.4.0
 [1.3.2]: https://github.com/Feridoun/MeetingRecorder/releases/tag/v1.3.2
 [1.3.1]: https://github.com/Feridoun/MeetingRecorder/releases/tag/v1.3.1
 [1.3.0]: https://github.com/Feridoun/MeetingRecorder/releases/tag/v1.3.0

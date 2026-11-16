@@ -90,7 +90,8 @@ Click the icon for the menu, which also has **Microphone**, **Sensitive**, **Tag
 status, **Keep last recording on this PC**, **Upload now**, **Open Speakr**,
 **Recordings...**, the recordings folder and **Settings**. If another app
 already uses one of the shortcuts, MeetingRecorder tells you at start-up and
-leaves that shortcut out of the menu.
+leaves that shortcut out of the menu. The menu, Settings and Recordings follow
+Windows' light or dark app mode.
 
 Tray icon colours: **blue in a ring** idle, **red** recording, **purple** recording in
 local-only mode, **amber** paused. While recording, the dot glows with your
